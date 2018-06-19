@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from NetworkUtil import IPInfo
+from NetworkUtil import HttpInfo
 from CacheManager import CacheManager
 from Logger import Logger
 from XlsxUtil import XlsxHelper
@@ -13,14 +13,14 @@ from datetime import datetime
 
 def usage(script_name):
     print"""\
-Usage: python %s -r <File listing Hostname> [-w <XLSX Report>] [-d <DB file>]
+Usage: python %s -r <File listing Url> [-w <XLSX Report>] [-d <DB file>]
        python %s <Hostname>
-       -r  hostname in plaintext, line by line
+       -r  url in plaintext, line by line
        -w  default is YYYY-MMDD-HHMMSS.xlsx
        -d  database file, default is db.sqlite
-ex.  : python %s google.com
-ex.  : python %s -r hosts.txt -w report.xlsx
-ex.  : python %s -r hosts.txt -w report.xlsx -d db.sqlite
+ex.  : python %s https://www.google.com
+ex.  : python %s -r urls.txt -w report.xlsx
+ex.  : python %s -r urls.txt -w report.xlsx -d db.sqlite
 """ % (script_name, script_name, script_name, script_name, script_name)
 
 
@@ -31,7 +31,7 @@ def candidate_filename():
 def parse_parameters(params, config):
     """
     config = dict()
-    config[read]  :  hostname list file
+    config[read]  :  url list file
     config[write] :  xlsx to write
     config[db]    :  database for caching query
     """
@@ -77,48 +77,46 @@ def parse_parameters(params, config):
     if db4cache:
         config['db'] = db4cache
     if len(hostnames):
-        config['hostname'] = hostnames
+        config['url'] = hostnames
     return True
 
 
-class AnswerIPInfo_withCache:
+class AnswerHttpPing_withCache:
 
     def __init__(self, path_db = None):
-        self.ipinfo = IPInfo()
+        self.httping = HttpInfo()
+        table_name = "httping"
         if path_db:
-            self.cache = CacheManager(name_table="ipinfo",
+            self.cache = CacheManager(name_table=table_name,
                                       path_database=path_db)
         else:
-            self.cache = CacheManager(name_table="ipinfo",
+            self.cache = CacheManager(name_table=table_name,
                                       path_database=os.path.join(
                                           os.getcwd(), "db.sqlite"))
         self.cache.setup("CREATE TABLE %s ("
-                         "_hostname TEXT PRIMARY KEY, "
-                         "city TEXT, "
-                         "country TEXT, "
-                         "countryCode TEXT, "
-                         "org TEXT, "
-                         "query TEXT);" % "ipinfo")
+                         "_url TEXT PRIMARY KEY, "
+                         "code TEXT, "
+                         "size TEXT, "
+                         "duration TEXT);" % table_name)
 
-    def query(self, hostname):
-        from_cache = self.cache.retrieve_from_cache("_hostname", hostname)
+    def query(self, url):
+        from_cache = self.cache.retrieve_from_cache("_url", url)
         if from_cache:
-            Logger.debug("from cache for %s" % hostname)
+            Logger.debug("from cache for %s" % url)
             return from_cache
         else:
-            from_query = self.ipinfo.query(hostname)
-            Logger.debug("from query for %s" % hostname)
+            from_query = self.httping.query(url)
+            Logger.debug("from query for %s" % url)
             if from_query:
-                terms = [from_query['hostname'], from_query['city'],
-                         from_query['country'], from_query['countryCode'],
-                         from_query['org'], from_query['query']]
+                terms = [from_query['url'], str(from_query['code']),
+                         str(from_query['size']), str(from_query['duration'])]
                 self.cache.insert_to_cache(terms)
                 return terms
 
 
 def batch_query(file2read, file2write, query_helper):
     writer = XlsxHelper(file2write)
-    header = ['hostname', 'city', 'country', 'countryCode', 'org', 'query']
+    header = ['url', 'code', 'size', 'duration']
 
     def body():
         with open(file2read, 'rt') as reader:
@@ -127,30 +125,30 @@ def batch_query(file2read, file2write, query_helper):
                 answer = query_helper.query(question)
                 yield list(answer)
 
-    writer.write('ipinfo', header, body())
+    writer.write('httping', header, body())
 
 
 def test():
-    questions = [u"www.google.com", u"www.facebook.com", u"www.cnn.com",
-                 u"www.yahoo.com"]
-    answer = AnswerIPInfo_withCache()
+    questions = ["https://www.google.com", "https://www.facebook.com",
+                 "https://www.cnn.com", "https://www.yahoo.com"]
+    answer = HttpInfo()
     for i in questions:
         print answer.query(i)
+        print answer.code, answer.size, answer.KB_ps, answer.MB_ps
 
 
 if __name__ == '__main__':
-
     config = dict()
     if not parse_parameters(sys.argv[1:], config):
         usage(os.path.split(sys.argv[0])[-1])
         exit(0)
     if 'db' in config:
-        finder = AnswerIPInfo_withCache(config['db'])
+        finder = AnswerHttpPing_withCache(config['db'])
     else:
-        finder = AnswerIPInfo_withCache()
+        finder = AnswerHttpPing_withCache()
     # stdout only
-    if 'hostname' in config:
-        for i in config['hostname']:
+    if 'url' in config:
+        for i in config['url']:
             print ", ".join(finder.query(i))
     # file in, file out
     if 'read' in config:
